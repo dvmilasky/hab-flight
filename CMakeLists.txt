@@ -14,4 +14,10 @@ add_executable(hab-flight src/main.cpp)
 
 target_link_libraries(hab-flight pico_stdlib)
 
+pico_enable_stdio_usb(hab-flight 1)
+pico_enable_stdio_uart(hab-flight 0)
+
+
+ 
+
 pico_add_extra_outputs(hab-flight)

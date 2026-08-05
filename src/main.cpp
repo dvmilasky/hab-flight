@@ -1,17 +1,27 @@
+#include <cstdio>
 #include "pico/stdlib.h"
+#include "hardware/uart.h"
 
-#define BLINK_INTERVAL 100
+
+#define BAUD_RATE 9600
+#define UART_TX_PIN 16
+#define UART_RX_PIN 17
+
+
 
 int main() {
-    gpio_init(PICO_DEFAULT_LED_PIN);
+    stdio_init_all();
 
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+
+    uart_init(uart0, BAUD_RATE);
+
+    gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
     while (true) {
-        gpio_put(PICO_DEFAULT_LED_PIN, 1);
-        sleep_ms(BLINK_INTERVAL);
-
-        gpio_put(PICO_DEFAULT_LED_PIN, 0);
-        sleep_ms(BLINK_INTERVAL);
+        if (uart_is_readable(uart0)) {
+            char in_byte = uart_getc(uart0);
+            std::printf("GPS Line: %c\n", in_byte);
+        }
     }
 }
