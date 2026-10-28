@@ -6,6 +6,7 @@
 #define BAUD_RATE 9600
 #define UART_TX_PIN 16
 #define UART_RX_PIN 17
+#define BUFFER_SIZE 85
 
 
 
@@ -18,10 +19,25 @@ int main() {
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
+    char databuffer[85];
+    uint8_t i = 0;
     while (true) {
         if (uart_is_readable(uart0)) {
             char in_byte = uart_getc(uart0);
-            std::printf("GPS Line: %c\n", in_byte);
+            if (i < BUFFER_SIZE - 1) {
+                if (in_byte == '\n') {
+                    databuffer[i] = '\0';
+                    std::printf("GPS Line: %s\n", databuffer);
+                    i = 0;
+                } else {
+                    databuffer[i] = in_byte;
+                    i++;
+                }
+            } else {
+                databuffer[i] = '\0';
+                std::printf("Missing termination byte. Throwing line away: %s", databuffer);
+                i = 0;
+            }
         }
     }
 }
