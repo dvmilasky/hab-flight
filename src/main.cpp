@@ -15,6 +15,8 @@ constexpr uint BUFFER_SIZE = 85;
 
 // 1MHz - keep some margin (10MHz max on radio's SX1276 chip)
 constexpr uint RADIO_CLOCK_RATE = 1000 * 1000;
+constexpr uint RADIO_WRITE_FLAG = 0x80;
+constexpr uint RADIO_READ_MASK = 0x7F;
 
 constexpr uint SPI_CLOCK_PIN = 10;
 constexpr uint SPI_TX_PIN = 11;
@@ -22,22 +24,26 @@ constexpr uint SPI_RX_PIN = 12;
 constexpr uint SPI_CHIP_SELECT_PIN = 13;
 constexpr uint SPI_RST_PIN = 14;
 
+
 // Radio Registers
 
 constexpr uint8_t VERSION_REGISTER = 0x42;
+constexpr uint8_t RX_DELAY_REGISTER = 0x23;
 
-
-int main() {
-    stdio_init_all();
-
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-
+void init_gps_uart() {
     uart_init(uart0, GPS_BAUD_RATE);
-
     gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
     gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
+}
 
+void reset_radio_state() {
+    gpio_put(SPI_RST_PIN, 0);
+    sleep_ms(1);
+    gpio_put(SPI_RST_PIN, 1);
+    sleep_ms(10);
+}
+
+uint init_radio() {
     gpio_set_function(SPI_CLOCK_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI_TX_PIN, GPIO_FUNC_SPI);
     gpio_set_function(SPI_RX_PIN, GPIO_FUNC_SPI);
@@ -49,30 +55,63 @@ int main() {
     // Initially set chip select high
     gpio_put(SPI_CHIP_SELECT_PIN, 1);
 
-
-    const uint actual_baud = spi_init(spi1,  RADIO_CLOCK_RATE);
+    const uint baud = spi_init(spi1,  RADIO_CLOCK_RATE);
 
     // Clear radio state
     gpio_set_dir(SPI_RST_PIN, GPIO_OUT);
-    gpio_put(SPI_RST_PIN, 0);
-    sleep_ms(1);
-    gpio_put(SPI_RST_PIN, 1);
-    sleep_ms(10);
+    reset_radio_state();
+    return baud;
+}
+
+
+void write_byte_to_radio_register(uint8_t reg, uint8_t data) {
+    // Set chip select low to start SPI convo
+    gpio_put(SPI_CHIP_SELECT_PIN, 0);
+
+    reg |= RADIO_WRITE_FLAG;
+    spi_write_blocking(spi1, &reg, sizeof(reg));
+    spi_write_blocking(spi1, &data, sizeof(data));
+
+    // Set chip select back to high
+    gpio_put(SPI_CHIP_SELECT_PIN, 1);
+}
+
+uint8_t read_radio_byte_from_register(uint8_t reg) {
+    // Set chip select low to start SPI convo
+    gpio_put(SPI_CHIP_SELECT_PIN, 0);
+
+    reg &= RADIO_READ_MASK;
+    spi_write_blocking(spi1, &reg, sizeof(reg));
+
+    uint8_t read_byte;
+    spi_read_blocking(spi1, 0x00, &read_byte, sizeof(read_byte));
+
+    // Set chip select back to high
+    gpio_put(SPI_CHIP_SELECT_PIN, 1);
+
+    return read_byte;
+}
+
+int main() {
+    stdio_init_all();
+    init_gps_uart();
+    const uint actual_baud = init_radio();
+    std::printf("Radio Baud Set: %u\n", actual_baud);
+
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
 
     while (true) {
-        std::printf("Radio Baud Set: %u\n", actual_baud);
         gpio_put(PICO_DEFAULT_LED_PIN, !gpio_get(PICO_DEFAULT_LED_PIN));
-        // Set chip select low to start SPI convo
-        gpio_put(SPI_CHIP_SELECT_PIN, 0);
+        reset_radio_state();
+        uint8_t rx_delay;
 
-        spi_write_blocking(spi1, &VERSION_REGISTER, sizeof(VERSION_REGISTER));
-        uint8_t radio_version;
-        spi_read_blocking(spi1, 0xA5, &radio_version, sizeof(radio_version));
+        rx_delay = read_radio_byte_from_register(RX_DELAY_REGISTER);
+        std::printf("Radio Delay (Before Set): 0x%02X\n", rx_delay);
 
-        std::printf("Radio Version Register: 0x%02X\n", radio_version);
-        
-        // Set back to high when done reading version
-        gpio_put(SPI_CHIP_SELECT_PIN, 1);
+        write_byte_to_radio_register(RX_DELAY_REGISTER, 0xA5);
+        rx_delay = read_radio_byte_from_register(RX_DELAY_REGISTER);
+        std::printf("Radio Delay (After Set): 0x%02X\n", rx_delay);
 
         sleep_ms(5000);
     }
