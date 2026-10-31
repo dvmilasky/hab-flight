@@ -6,18 +6,18 @@ set(PICO_SDK_FETCH_FROM_GIT_TAG "2.3.0")
 
 include(pico_sdk_import.cmake)
 
-project(hab-flight)
+project(rocket-controller)
 
 pico_sdk_init()
 
-add_executable(hab-flight src/main.cpp)
+add_executable(rocket-controller src/main.cpp)
 
-target_link_libraries(hab-flight pico_stdlib)
+target_link_libraries(rocket-controller pico_stdlib hardware_spi)
 
-pico_enable_stdio_usb(hab-flight 1)
-pico_enable_stdio_uart(hab-flight 0)
+pico_enable_stdio_usb(rocket-controller 1)
+pico_enable_stdio_uart(rocket-controller 0)
 
 
  
 
-pico_add_extra_outputs(hab-flight)
+pico_add_extra_outputs(rocket-controller)
