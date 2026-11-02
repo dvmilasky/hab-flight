@@ -4,19 +4,24 @@
 #include "drivers/radio.h"
 #include "pico/stdlib.h"
 
+
+
 int main() {
     board_init();
 
     while (true) {
         status_led_toggle();
-        uint8_t op_mode;
+        RadioStatus status;
+        
+        uint8_t mode;
+        status = read_radio_mode(mode);
+        assert(status == RadioStatus::Ok);
+        std::printf("Operating Mode: 0x%02X\n", mode);
 
-        op_mode = read_radio_byte_from_register(OP_MODE_REGISTER);
-        std::printf("Operating Mode: 0x%02X\n", op_mode);
-
-        std::printf("Radio Frequency Initialized to 0x%02X,  0x%02X,  0x%02X\n", read_radio_byte_from_register(FREQUENCY_REGISTER_MSB), \
-        read_radio_byte_from_register(FREQUENCY_REGISTER_MID), \
-        read_radio_byte_from_register(FREQUENCY_REGISTER_LSB));
+        uint32_t freq;
+        status = read_radio_frequency(freq);
+        assert(status == RadioStatus::Ok);
+        std::printf("Radio Frequency Initialized to %luhz\n", freq);
 
         sleep_ms(5000);
     }

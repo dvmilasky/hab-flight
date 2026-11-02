@@ -30,8 +30,8 @@ void board_init() {
         SPI_CHIP_SELECT_PIN,    // chip_select_pin
         SPI_RST_PIN,            // reset_pin
     };
-    uint actual_baud = init_radio(radio_config);
-    std::printf("Radio Baud Set: %u\n", actual_baud);
+    RadioStatus status = init_radio(radio_config);
+    assert(status == RadioStatus::Ok);
 }
 
 void status_led_toggle() {

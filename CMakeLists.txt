@@ -25,6 +25,7 @@ target_link_libraries(board PRIVATE drivers pico_stdlib)
 
 add_executable(rocket-controller src/controllers/flight-controller.cpp)
 target_link_libraries(rocket-controller board drivers pico_stdlib hardware_spi)
+target_compile_options(rocket-controller PRIVATE -Wall -Wextra)
 
 pico_enable_stdio_usb(rocket-controller 1)
 pico_enable_stdio_uart(rocket-controller 0)
