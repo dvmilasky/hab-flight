@@ -17,14 +17,16 @@ struct RadioConfig {
 
 enum class RadioStatus {
     Ok,
-    NotInitialized
+    NotInitialized,
+    EmptyPayload,
+    NullData,
+    PayloadTooLarge,
+    NotConnected,
+    TxTimeout
 };
 // Sets up SPI and the radio. Must be called before any other radio function.
-// Returns the actual SPI baud rate.
+// Radio set to standby mode upon return
 [[nodiscard]] RadioStatus init_radio(const RadioConfig& config);
-
-void reset_radio_state();
-
 
 // Reads operation mode byte
 RadioStatus read_radio_mode(uint8_t& mode_out);

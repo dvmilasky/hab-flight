@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <iterator>
 #include "board/board.h"
 #include "drivers/gps.h"
 #include "drivers/radio.h"
@@ -12,16 +13,16 @@ int main() {
     while (true) {
         status_led_toggle();
         RadioStatus status;
-        
-        uint8_t mode;
-        status = read_radio_mode(mode);
-        assert(status == RadioStatus::Ok);
-        std::printf("Operating Mode: 0x%02X\n", mode);
 
         uint32_t freq;
         status = read_radio_frequency(freq);
         assert(status == RadioStatus::Ok);
         std::printf("Radio Frequency Initialized to %luhz\n", freq);
+
+        const uint8_t data[] = {0x23, 0x53, 0x43, 0x45};
+
+        status = transmit_data_blocking(data, std::size(data));
+        assert(status == RadioStatus::Ok);
 
         sleep_ms(5000);
     }
