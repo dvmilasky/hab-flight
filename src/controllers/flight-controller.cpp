@@ -1,6 +1,6 @@
 #include <cstdio>
 #include <iterator>
-#include "board/board.h"
+#include "board/flight-controller/board.h"
 #include "drivers/gps.h"
 #include "drivers/radio.h"
 #include "pico/stdlib.h"

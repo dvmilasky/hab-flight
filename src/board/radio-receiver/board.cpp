@@ -1,9 +1,7 @@
-#include "board/board.h"
-
 #include <cstdio>
 #include "pico/stdlib.h"
-#include "board/pins.h"
-#include "drivers/gps.h"
+#include "board/radio-receiver/board.h"
+#include "board/radio-receiver/pins.h"
 #include "drivers/radio.h"
 
 static void init_status_led() {
@@ -11,16 +9,9 @@ static void init_status_led() {
     gpio_set_dir(STATUS_LED_PIN, GPIO_OUT);
 }
 
-void board_init() {
+BoardStatus board_init() {
     stdio_init_all();
     init_status_led();
-
-    const GpsConfig gps_config = {
-        uart0,          // uart
-        UART_TX_PIN,    // tx_pin
-        UART_RX_PIN,    // rx_pin
-    };
-    init_gps_uart(gps_config);
 
     const RadioConfig radio_config = {
         spi1,                   // spi
@@ -31,7 +22,12 @@ void board_init() {
         SPI_RST_PIN,            // reset_pin
     };
     RadioStatus status = init_radio(radio_config);
-    assert(status == RadioStatus::Ok);
+    if (status != RadioStatus::Ok) {
+        const char* err = get_error_msg(status);
+        std::printf("Error initializing Radio: %s\n", err);
+        return BoardStatus::FailedInitialization;
+    }
+    return BoardStatus::Ok;
 }
 
 void status_led_toggle() {

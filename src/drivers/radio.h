@@ -4,6 +4,8 @@
 #include "pico/types.h"
 #include "hardware/spi.h"
 
+constexpr size_t RADIO_MAX_PAYLOAD = 255;
+
 
 // How the radio is wired to the Pico. Board fills this
 struct RadioConfig {
@@ -22,7 +24,10 @@ enum class RadioStatus {
     NullData,
     PayloadTooLarge,
     NotConnected,
-    TxTimeout
+    TxTimeout,
+    RxTimeout,
+    PayloadCorrupted,
+    NoPacket
 };
 // Sets up SPI and the radio. Must be called before any other radio function.
 // Radio set to standby mode upon return
@@ -36,3 +41,8 @@ RadioStatus read_radio_frequency(uint32_t& frequency_out);
 
 // Transmits buffer of data (Blocking)
 [[nodiscard]] RadioStatus transmit_data_blocking(const uint8_t *data, size_t len);
+
+[[nodiscard]] RadioStatus enable_rx_continuous_mode();
+[[nodiscard]] RadioStatus poll_for_packet(uint8_t (&buffer)[RADIO_MAX_PAYLOAD], uint8_t &len_out);
+
+const char* get_error_msg(RadioStatus status);

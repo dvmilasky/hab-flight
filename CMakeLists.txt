@@ -18,19 +18,27 @@ add_library(drivers STATIC
 target_include_directories(drivers PUBLIC src)
 target_link_libraries(drivers PUBLIC pico_stdlib_headers hardware_spi_headers)
 
-add_library(board STATIC
-    src/board/board.cpp
+add_library(flight-board STATIC
+    src/board/flight-controller/board.cpp
 )
-target_link_libraries(board PRIVATE drivers pico_stdlib)
+add_library(receiver-board STATIC
+    src/board/radio-receiver/board.cpp
+)
+target_link_libraries(flight-board PRIVATE drivers pico_stdlib)
+target_link_libraries(receiver-board PRIVATE drivers pico_stdlib)
 
 add_executable(rocket-controller src/controllers/flight-controller.cpp)
-target_link_libraries(rocket-controller board drivers pico_stdlib hardware_spi)
+target_link_libraries(rocket-controller flight-board drivers pico_stdlib hardware_spi)
 target_compile_options(rocket-controller PRIVATE -Wall -Wextra)
+
+add_executable(radio-receiver src/controllers/radio-receiver.cpp)
+target_link_libraries(radio-receiver receiver-board drivers pico_stdlib hardware_spi)
+target_compile_options(radio-receiver PRIVATE -Wall -Wextra)
 
 pico_enable_stdio_usb(rocket-controller 1)
 pico_enable_stdio_uart(rocket-controller 0)
-
-
- 
-
 pico_add_extra_outputs(rocket-controller)
+
+pico_enable_stdio_usb(radio-receiver 1)
+pico_enable_stdio_uart(radio-receiver 0)
+pico_add_extra_outputs(radio-receiver)

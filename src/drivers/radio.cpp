@@ -6,13 +6,13 @@
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 
-constexpr size_t RADIO_MAX_PAYLOAD = 255;
-
 // 1MHz - keep some margin (10MHz max on radio's SX1276 chip)
 constexpr uint32_t RADIO_CLOCK_RATE{1000 * 1000};
 constexpr uint8_t RADIO_WRITE_FLAG = 0x80;
 constexpr uint8_t RADIO_READ_MASK = 0x7F;
 constexpr uint64_t RADIO_TX_TIMEOUT_US = 3'000'000; // 3 seconds
+constexpr uint64_t RADIO_RX_TIMEOUT_US = 3'000'000; // 3 seconds
+
 
 // Radio Settings
 constexpr uint8_t RADIO_VERSION = 0x12;
@@ -24,6 +24,7 @@ constexpr uint8_t MODE_MASK = 0x07;
 constexpr uint8_t MODE_SLEEP = 0x00;
 constexpr uint8_t MODE_STANDBY = 0x01;
 constexpr uint8_t MODE_TX = 0x03;
+constexpr uint8_t MODE_RX_CONTINUOUS = 0x05;
 
 constexpr uint8_t LORA_MODE_FLAG = 0x80;
 
@@ -39,6 +40,9 @@ constexpr uint64_t HZ_FROM_REGISTER(uint64_t reg) {
     return reg * 32'000'000 / (1 << 19); // Frf = f_RF * 2^19 / F_XOSC (F_XOSC/2^19 is lowest freq synethesizer step (61hz))
 }
 
+constexpr uint8_t MODEM_CONFIG_2_REGISTER = 0x1E;
+constexpr uint8_t ENABLE_CRC_FLAG = 0x04;
+
 constexpr uint8_t PA_CONFIG_REGISTER = 0x09;
 
 constexpr uint8_t PA_CONFIG_SELECT_BOOST = 0x80;
@@ -48,12 +52,14 @@ constexpr uint8_t PA_CONFIG_POWER_MAX = 0x0F; // 17 dBm
 
 // FIFO Register Values
 constexpr uint8_t FIFO_REGISTER = 0x00;
+constexpr uint8_t FIFO_BASE_ADDR_MIN = 0x00;
+constexpr uint8_t FIFO_ADDR_PTR_REGISTER = 0x0D;
 
 constexpr uint8_t FIFO_TX_BASE_ADDR_REGISTER = 0x0E;
-constexpr uint8_t FIFO_RX_BASE_ADDR_REGISTER = 0x0F;
-constexpr uint8_t FIFO_BASE_ADDR_MIN = 0x00;
 
-constexpr uint8_t FIFO_ADDR_PTR_REGISTER = 0x0D;
+constexpr uint8_t FIFO_RX_BASE_ADDR_REGISTER = 0x0F;
+constexpr uint8_t FIFO_RX_CURRENT_ADDR_REGISTER = 0x10;
+constexpr uint8_t RX_NB_BYTES_REGISTER = 0x13;
 
 // Payload length
 constexpr uint8_t PAYLOAD_LENGTH_REGISTER = 0x22;
@@ -62,6 +68,9 @@ constexpr uint8_t PAYLOAD_LENGTH_REGISTER = 0x22;
 constexpr uint8_t IRQ_FLAGS_REGISTER = 0x12;
 
 constexpr uint8_t IRQ_TX_BIT = 0x08;
+
+constexpr uint8_t IRQ_RX_DONE_BIT = 0x40;
+constexpr uint8_t IRQ_RX_CRC_ERROR_BIT = 0x20;
 
 
 // Wiring saved by init_radio() for use by the other radio functions.
@@ -87,6 +96,20 @@ namespace {
         reg |= RADIO_WRITE_FLAG;
         spi_write_blocking(g_radio.config.spi, &reg, sizeof(reg));
         spi_write_blocking(g_radio.config.spi, data, size);
+
+        // Set chip select back to high
+        gpio_put(g_radio.config.chip_select_pin, 1);
+    }
+
+    // Size is uint8_t here because max payload is 255 bytes
+    void read_buffer_from_register(uint8_t reg, uint8_t (&buffer)[RADIO_MAX_PAYLOAD], uint8_t size) {
+        // Set chip select low to start SPI convo
+        gpio_put(g_radio.config.chip_select_pin, 0);
+        
+        // Set read flag of register
+        reg &= RADIO_READ_MASK;
+        spi_write_blocking(g_radio.config.spi, &reg, sizeof(reg));
+        spi_read_blocking(g_radio.config.spi, 0x00, buffer, size);
 
         // Set chip select back to high
         gpio_put(g_radio.config.chip_select_pin, 1);
@@ -120,11 +143,26 @@ namespace {
         return read_byte;
     }
 
+    void enable_crc_on_payloads() {
+        uint8_t modem_config = read_radio_byte_from_register(MODEM_CONFIG_2_REGISTER);
+        modem_config |= ENABLE_CRC_FLAG;
+        write_byte_to_radio_register(MODEM_CONFIG_2_REGISTER, modem_config);
+    }
+
     void set_mode(uint8_t mode) {
         mode &= MODE_MASK; // Ensure we only touch the mode bits
         uint8_t op_mode_byte = read_radio_byte_from_register(OP_MODE_REGISTER);
         op_mode_byte &= ~MODE_MASK;
         write_byte_to_radio_register(OP_MODE_REGISTER, mode | op_mode_byte);
+    }
+
+    void enable_lora_mode() {
+        set_mode(MODE_SLEEP);
+        write_byte_to_radio_register(OP_MODE_REGISTER, MODE_SLEEP | LORA_MODE_FLAG);
+    }
+
+    void clear_irq_flags_register() {
+        write_byte_to_radio_register(IRQ_FLAGS_REGISTER, 0xFF);
     }
 }
 
@@ -150,13 +188,14 @@ namespace {
     reset_radio_state();
 
     // Verify Radio connectivity by reading version
-    if (read_radio_byte_from_register(VERSION_REGISTER) != RADIO_VERSION) {
+    uint8_t version = read_radio_byte_from_register(VERSION_REGISTER);
+    if (version != RADIO_VERSION) {
+        std::printf("Wrong Version. Read 0x%02X\n", version);
         return RadioStatus::NotConnected;
     }
 
-    // Set radio to sleep mode and mode to LORA
-    write_byte_to_radio_register(OP_MODE_REGISTER, MODE_SLEEP);
-    write_byte_to_radio_register(OP_MODE_REGISTER, MODE_SLEEP | LORA_MODE_FLAG);
+    // Enable LORA Mode
+    enable_lora_mode();
 
     // Set frequency to 915MHz
     write_byte_to_radio_register(FREQUENCY_REGISTER_MSB, (FREQUENCY_SETTING >> 16) & 0xFF);
@@ -166,8 +205,11 @@ namespace {
     // Set output pin to PA_BOOST
     write_byte_to_radio_register(PA_CONFIG_REGISTER, PA_CONFIG_SELECT_BOOST | PA_CONFIG_POWER_MIN);
 
+    // Enable CRC checksum on payloads
+    enable_crc_on_payloads();
+
     // Set radio to standby mode
-    write_byte_to_radio_register(OP_MODE_REGISTER, LORA_MODE_FLAG | MODE_STANDBY);
+    set_mode(MODE_STANDBY);
 
     // Set TX/RX base addresses to 0x00 (each radio uses entirety of FIFO cache for TX/RX respectively)
     write_byte_to_radio_register(FIFO_TX_BASE_ADDR_REGISTER, FIFO_BASE_ADDR_MIN);
@@ -249,4 +291,61 @@ RadioStatus read_radio_frequency(uint32_t& frequency_out) {
     write_byte_to_radio_register(IRQ_FLAGS_REGISTER, IRQ_TX_BIT);
 
     return RadioStatus::Ok;
+}
+
+[[nodiscard]] RadioStatus enable_rx_continuous_mode() {
+    set_mode(MODE_STANDBY);
+    // Set FIFO address pointer to the base addr min (0x00)
+    write_byte_to_radio_register(FIFO_ADDR_PTR_REGISTER, FIFO_BASE_ADDR_MIN);
+
+    clear_irq_flags_register();
+
+    // Ensure radio is in standby mode before FIFO RX
+    set_mode(MODE_RX_CONTINUOUS);
+    return RadioStatus::Ok;
+}
+
+[[nodiscard]] RadioStatus poll_for_packet(uint8_t (&buffer)[RADIO_MAX_PAYLOAD], uint8_t &len_out) {
+    if (!g_radio.initialized) {
+        return RadioStatus::NotInitialized;
+    }
+
+    uint8_t irq_flags = read_radio_byte_from_register(IRQ_FLAGS_REGISTER);
+
+    if (!(irq_flags & IRQ_RX_DONE_BIT)) {
+        return RadioStatus::NoPacket;
+    }
+
+    if (irq_flags & IRQ_RX_CRC_ERROR_BIT) {
+        write_byte_to_radio_register(IRQ_FLAGS_REGISTER, IRQ_RX_CRC_ERROR_BIT | IRQ_RX_DONE_BIT);
+        return RadioStatus::PayloadCorrupted;
+    }
+
+    write_byte_to_radio_register(IRQ_FLAGS_REGISTER, IRQ_RX_DONE_BIT);
+
+    len_out = read_radio_byte_from_register(RX_NB_BYTES_REGISTER);
+
+    // Set FIFO address pointer to current RX address
+    write_byte_to_radio_register(FIFO_ADDR_PTR_REGISTER, read_radio_byte_from_register(FIFO_RX_CURRENT_ADDR_REGISTER));
+
+    // Read payload out of FIFO Addr
+    read_buffer_from_register(FIFO_REGISTER, buffer, len_out);
+
+    return RadioStatus::Ok;
+}
+
+
+const char* get_error_msg(RadioStatus status) {
+    switch (status) {
+        case RadioStatus::NotInitialized:
+            return "Not initialized";
+        case RadioStatus::NotConnected:
+            return "Not connected";
+        case RadioStatus::PayloadCorrupted:
+            return "Payload Corrupted";
+        case RadioStatus::NoPacket:
+            return "No Packet";
+        default:
+            return "Unknown Error";
+    }
 }
